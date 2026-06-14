@@ -51,9 +51,9 @@ def create_release(version):
     args = [GH, "release", "create", f"v{version}",
             "--title", f"Muktadha v{version}",
             "--notes", f"See https://github.com/JonamMadeda/muktadha/releases/tag/v{version}",
-            str(exe), str(inst)]
+            str(inst)]
     subprocess.run(args, check=True)
-    print(f"[release] GitHub release v{version} created with assets")
+    print(f"[release] GitHub release v{version} created with Muktadha_Installer.exe")
 
 
 def main():

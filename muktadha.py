@@ -699,15 +699,10 @@ def check_for_updates(icon):
         if tuple(map(int, latest_tag.split("."))) <= tuple(map(int, __version__.split("."))):
             return
         url = None
-        is_installer = False
         for asset in data.get("assets", []):
-            name = asset.get("name", "")
-            if name == "Muktadha_Installer.exe":
+            if asset.get("name") == "Muktadha_Installer.exe":
                 url = asset["browser_download_url"]
-                is_installer = True
                 break
-            if name == "Muktadha.exe":
-                url = asset["browser_download_url"]
         if not url:
             return
         import tkinter as tk
@@ -721,29 +716,16 @@ def check_for_updates(icon):
         root.destroy()
         if not ans:
             return
-        threading.Thread(target=download_and_update, args=(url, latest_tag, is_installer), daemon=True).start()
+        threading.Thread(target=download_and_update, args=(url, latest_tag), daemon=True).start()
     except Exception:
         pass
 
 
-def download_and_update(url, version, is_installer):
+def download_and_update(url, version):
     try:
         tmp = Path(tempfile.gettempdir()) / f"Muktadha_{version}.exe"
         urllib.request.urlretrieve(url, tmp)
-        if is_installer:
-            subprocess.Popen([str(tmp), "/SILENT"])
-            release_lock()
-            sys.exit(0)
-        exe = sys.executable if getattr(sys, "frozen", False) else str(Path(__file__).resolve())
-        script = tmp.with_suffix(".ps1")
-        script.write_text(
-            f'Start-Sleep -Seconds 2\n'
-            f'Copy-Item -LiteralPath "{tmp}" -Destination "{exe}" -Force\n'
-            f'Start-Process -FilePath "{exe}"\n'
-            f'Remove-Item -LiteralPath "{tmp}" -Force -ErrorAction SilentlyContinue\n'
-            f'Remove-Item -LiteralPath "{script}" -Force -ErrorAction SilentlyContinue\n'
-        )
-        subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-File", str(script)])
+        subprocess.Popen([str(tmp), "/SILENT"])
         release_lock()
         sys.exit(0)
     except Exception:

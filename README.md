@@ -1,5 +1,7 @@
 # Muktadha
 
+[![Download](https://img.shields.io/badge/Download-v1.1.0-blue?style=for-the-badge&logo=github)](https://github.com/JonamMadeda/muktadha/releases/latest)
+
 A Windows system-tray environment switcher. Quickly switch between work, chill, or custom modes — launching apps, opening URLs, and closing processes with one click.
 
 ## Features
@@ -10,28 +12,23 @@ A Windows system-tray environment switcher. Quickly switch between work, chill, 
 - **Browse installed apps** — scan Start Menu for installed applications
 - **Single instance** — only one instance runs at a time
 - **Run at startup** — toggle from the tray menu
-- **Splash screen** — shown on startup (frozen build only)
-- **Portable build** — single-file `.exe` via PyInstaller
+- **Auto-update** — built-in check for new releases
+- **Splash screen** — shown on startup
+- **Proper installer** — installs to Program Files, uninstall via Control Panel
 
-## Usage
+## Install
 
-1. Run `build.py` to generate `dist/Muktadha.exe`
-2. Launch `Muktadha.exe` — the tray icon appears
-3. Right-click the tray icon to:
-   - Switch modes
-   - Open Settings
-   - Toggle "Run at startup"
-   - Exit
+Download the latest `Muktadha_Installer.exe` from [Releases](https://github.com/JonamMadeda/muktadha/releases/latest) and run it.
+
+## Build from Source
+
+```bash
+pip install -r requirements.txt
+python build.py          # builds dist/Muktadha.exe
+python release.py 1.1.0  # or use Inno Setup for the installer
+```
 
 ## Requirements
 
 - Python 3.10+
 - `pystray`, `Pillow`, `psutil` (see `requirements.txt`)
-
-## Build
-
-```bash
-python build.py
-```
-
-Output: `dist/Muktadha.exe` (single file, ~55 MB)
