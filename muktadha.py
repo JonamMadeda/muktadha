@@ -11,7 +11,7 @@ import urllib.error
 import webbrowser
 from pathlib import Path
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 import psutil
 import pystray
@@ -719,6 +719,11 @@ def check_for_updates(icon):
         threading.Thread(target=download_and_update, args=(url, latest_tag), daemon=True).start()
     except Exception:
         pass
+
+
+def exit_app(icon):
+    release_lock()
+    icon.stop()
 
 
 def download_and_update(url, version):
