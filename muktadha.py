@@ -4,8 +4,14 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import threading
+import urllib.request
+import urllib.error
 import webbrowser
 from pathlib import Path
+
+__version__ = "1.0.0"
 
 import psutil
 import pystray
@@ -136,6 +142,7 @@ def build_menu(config):
     items.append(pystray.Menu.SEPARATOR)
     items.append(pystray.MenuItem("Settings", open_settings))
     items.append(pystray.MenuItem("Open Config File", open_config_file))
+    items.append(pystray.MenuItem(f"v{__version__}  Check for Updates", check_for_updates))
     startup_label = "\u2713 Run at startup" if is_startup_enabled() else "   Run at startup"
     items.append(pystray.MenuItem(startup_label, toggle_startup))
     items.append(pystray.Menu.SEPARATOR)
@@ -198,11 +205,12 @@ def toggle_startup(icon):
     update_menu(icon)
 
 
-def open_settings(_icon=None):
+def open_settings(icon):
     if getattr(sys, "frozen", False):
-        subprocess.Popen([sys.executable, "--settings"])
+        subprocess.run([sys.executable, "--settings"])
     else:
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--settings"])
+        subprocess.run([sys.executable, str(Path(__file__).resolve()), "--settings"])
+    update_menu(icon)
 
 
 def run_settings_window():
@@ -250,14 +258,37 @@ def run_settings_window():
     window.configure(bg=C["bg"])
     window.protocol("WM_DELETE_WINDOW", window.destroy)
 
+    def next_mode_key():
+        base = "mktCustom"
+        i = 1
+        while f"{base}_{i:02d}" in modes:
+            i += 1
+        return f"{base}_{i:02d}"
+
     # --- Header ---
     header = tk.Frame(window, bg=C["surface"])
     header.pack(fill=tk.X)
     tk.Frame(header, bg=C["primary"], height=3).pack(fill=tk.X)
     hc = tk.Frame(header, bg=C["surface"])
     hc.pack(fill=tk.X, padx=28, pady=18)
-    tk.Label(hc, text="Muktadha Settings", font=("Segoe UI", 20, "bold"),
-             bg=C["surface"], fg=C["text"]).pack(anchor=tk.W)
+    title_row = tk.Frame(hc, bg=C["surface"])
+    title_row.pack(fill=tk.X)
+    tk.Label(title_row, text="Muktadha Settings", font=("Segoe UI", 20, "bold"),
+             bg=C["surface"], fg=C["text"]).pack(side=tk.LEFT)
+    actions_frame = tk.Frame(title_row, bg=C["surface"])
+    actions_frame.pack(side=tk.RIGHT)
+    action_var = tk.StringVar(value="Mode Actions \u25be")
+    action_menu = ttk.Combobox(actions_frame, textvariable=action_var,
+                                state="readonly", width=18,
+                                font=("Segoe UI", 9),
+                                values=["Rename Current Mode", "Delete Current Mode"])
+    action_menu.bind("<<ComboboxSelected>>", lambda _: handle_mode_action())
+    action_menu.pack(side=tk.LEFT, padx=(0, 8))
+    tk.Button(actions_frame, text="+ New Mode", font=("Segoe UI", 9, "bold"),
+              bg=C["primary"], fg="white", relief="flat", padx=14, pady=4,
+              cursor="hand2", activebackground=C["primary_hover"],
+              activeforeground="white",
+              command=lambda: add_mode()).pack(side=tk.RIGHT)
     tk.Label(hc, text="Configure your environment modes \u2014 apps, URLs, and close rules",
              font=("Segoe UI", 10), bg=C["surface"], fg=C["text_sec"]).pack(anchor=tk.W)
 
@@ -306,108 +337,167 @@ def run_settings_window():
             items.append(p)
             lb.insert(tk.END, p)
 
-    # --- Build tabs ---
-    for mode_key, mode_config in modes.items():
-        tab = tk.Frame(notebook, bg=C["bg"])
-        notebook.add(tab, text=mode_config["displayName"])
+    def add_mode():
+        name = simpledialog.askstring("New Mode", "Enter a name for the new mode:",
+                                      parent=window)
+        if not name:
+            return
+        name = name.strip()
+        if not name:
+            return
+        key = next_mode_key()
+        modes[key] = {"displayName": name, "apps": [], "urls": [], "closeOnSwitch": []}
+        rebuild_tabs()
 
-        canvas = tk.Canvas(tab, bg=C["bg"], highlightthickness=0)
-        vsb = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=canvas.yview)
-        inner = tk.Frame(canvas, bg=C["bg"])
+    def delete_mode(key):
+        if len(modes) <= 1:
+            messagebox.showwarning("Cannot Delete", "At least one mode is required.",
+                                   parent=window)
+            return
+        if not messagebox.askyesno("Delete Mode",
+                                   f"Delete \"{modes[key]['displayName']}\" and all its settings?",
+                                   parent=window):
+            return
+        del modes[key]
+        if working.get("activeContext") == key:
+            remaining = list(modes.keys())
+            working["activeContext"] = remaining[0]
+        rebuild_tabs()
 
-        def _on_inner_configure(e, c=canvas):
-            c.configure(scrollregion=c.bbox("all"))
-        inner.bind("<Configure>", _on_inner_configure)
+    def rename_mode(key):
+        current = modes[key]["displayName"]
+        name = simpledialog.askstring("Rename Mode", "New name:",
+                                      initialvalue=current, parent=window)
+        if not name:
+            return
+        name = name.strip()
+        if not name:
+            return
+        modes[key]["displayName"] = name
+        rebuild_tabs()
 
-        inner_id = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
+    def handle_mode_action():
+        action = action_var.get()
+        sel = notebook.select()
+        if not sel:
+            return
+        idx = notebook.index(sel)
+        keys = list(modes.keys())
+        if idx < 0 or idx >= len(keys):
+            return
+        key = keys[idx]
+        if action == "Rename Current Mode":
+            rename_mode(key)
+        elif action == "Delete Current Mode":
+            delete_mode(key)
+        action_var.set("Mode Actions \u25be")
 
-        def _on_canvas_configure(e, c=canvas, iid=inner_id):
-            c.itemconfigure(iid, width=e.width)
-            c.configure(scrollregion=c.bbox("all"))
-        canvas.bind("<Configure>", _on_canvas_configure)
+    def rebuild_tabs():
+        for tab in notebook.tabs():
+            notebook.forget(tab)
+        for mode_key, mode_config in modes.items():
+            tab = tk.Frame(notebook, bg=C["bg"])
+            notebook.add(tab, text=mode_config["displayName"])
 
-        canvas.configure(yscrollcommand=vsb.set)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            canvas = tk.Canvas(tab, bg=C["bg"], highlightthickness=0)
+            vsb = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=canvas.yview)
+            inner = tk.Frame(canvas, bg=C["bg"])
 
-        def on_enter(e, c=canvas):
-            c.bind_all("<MouseWheel>", lambda ev, cn=c: cn.yview_scroll(
-                int(-1 * (ev.delta / 120)), "units"))
+            def _on_inner_configure(e, c=canvas):
+                c.configure(scrollregion=c.bbox("all"))
+            inner.bind("<Configure>", _on_inner_configure)
 
-        def on_leave(_):
-            canvas.unbind_all("<MouseWheel>")
+            inner_id = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
 
-        canvas.bind("<Enter>", on_enter)
-        canvas.bind("<Leave>", on_leave)
+            def _on_canvas_configure(e, c=canvas, iid=inner_id):
+                c.itemconfigure(iid, width=e.width)
+                c.configure(scrollregion=c.bbox("all"))
+            canvas.bind("<Configure>", _on_canvas_configure)
 
-        sections = [
-            ("Apps to Launch", "apps", True),
-            ("URLs to Open", "urls", False),
-            ("Close on Switch", "closeOnSwitch", False),
-        ]
+            canvas.configure(yscrollcommand=vsb.set)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        for label, key, is_file in sections:
-            card = tk.Frame(inner, bg=C["surface"],
-                            highlightbackground=C["border"], highlightthickness=1)
-            card.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 14))
+            def on_enter(e, c=canvas):
+                c.bind_all("<MouseWheel>", lambda ev, cn=c: cn.yview_scroll(
+                    int(-1 * (ev.delta / 120)), "units"))
 
-            tk.Frame(card, bg=C["primary"], height=3).pack(fill=tk.X)
+            def on_leave(_):
+                canvas.unbind_all("<MouseWheel>")
 
-            cc = tk.Frame(card, bg=C["surface"])
-            cc.pack(fill=tk.BOTH, expand=True, padx=18, pady=(14, 6))
+            canvas.bind("<Enter>", on_enter)
+            canvas.bind("<Leave>", on_leave)
 
-            # Title row
-            tr = tk.Frame(cc, bg=C["surface"])
-            tr.pack(fill=tk.X)
-            tk.Label(tr, text=label, font=("Segoe UI", 12, "bold"),
-                     bg=C["surface"], fg=C["text"]).pack(side=tk.LEFT)
+            sections = [
+                ("Apps to Launch", "apps", True),
+                ("URLs to Open", "urls", False),
+                ("Close on Switch", "closeOnSwitch", False),
+            ]
 
-            items = mode_config[key]
+            for label, key, is_file in sections:
+                card = tk.Frame(inner, bg=C["surface"],
+                                highlightbackground=C["border"], highlightthickness=1)
+                card.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 14))
 
-            # Listbox
-            lf = tk.Frame(cc, bg=C["surface"])
-            lf.pack(fill=tk.BOTH, expand=True, pady=(10, 8))
+                tk.Frame(card, bg=C["primary"], height=3).pack(fill=tk.X)
 
-            sb = tk.Scrollbar(lf)
-            lb = tk.Listbox(lf, yscrollcommand=sb.set, font=("Segoe UI", 10),
-                            bg="#f8fafc", fg=C["text"],
-                            relief="solid", borderwidth=1,
-                            highlightcolor=C["border"], highlightbackground=C["border"],
-                            activestyle="none",
-                            selectbackground=C["primary"], selectforeground="white")
-            sb.config(command=lb.yview)
-            lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            sb.pack(side=tk.RIGHT, fill=tk.Y)
+                cc = tk.Frame(card, bg=C["surface"])
+                cc.pack(fill=tk.BOTH, expand=True, padx=18, pady=(14, 6))
 
-            for item in items:
-                lb.insert(tk.END, item)
+                # Title row
+                tr = tk.Frame(cc, bg=C["surface"])
+                tr.pack(fill=tk.X)
+                tk.Label(tr, text=label, font=("Segoe UI", 12, "bold"),
+                         bg=C["surface"], fg=C["text"]).pack(side=tk.LEFT)
 
-            # Add button (in title row)
-            tk.Button(tr, text="+ Add", font=("Segoe UI", 9, "bold"),
-                      bg=C["primary"], fg="white",
-                      relief="flat", padx=14, pady=3, cursor="hand2",
-                      activebackground=C["primary_hover"], activeforeground="white",
-                      command=lambda lb=lb, items=items, f=is_file, k=key:
-                          add_item(lb, items, f, k)).pack(side=tk.RIGHT)
+                items = mode_config[key]
 
-            # Action row
-            ar = tk.Frame(cc, bg=C["surface"])
-            ar.pack(fill=tk.X)
+                # Listbox
+                lf = tk.Frame(cc, bg=C["surface"])
+                lf.pack(fill=tk.BOTH, expand=True, pady=(10, 8))
 
-            if key == "apps":
-                tk.Button(ar, text="\u2b50 Browse Installed\u2026",
-                          font=("Segoe UI", 9), bg=C["surface"], fg=C["primary"],
+                sb = tk.Scrollbar(lf)
+                lb = tk.Listbox(lf, yscrollcommand=sb.set, font=("Segoe UI", 10),
+                                bg="#f8fafc", fg=C["text"],
+                                relief="solid", borderwidth=1,
+                                highlightcolor=C["border"], highlightbackground=C["border"],
+                                activestyle="none",
+                                selectbackground=C["primary"], selectforeground="white")
+                sb.config(command=lb.yview)
+                lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+                for item in items:
+                    lb.insert(tk.END, item)
+
+                # Add button (in title row)
+                tk.Button(tr, text="+ Add", font=("Segoe UI", 9, "bold"),
+                          bg=C["primary"], fg="white",
+                          relief="flat", padx=14, pady=3, cursor="hand2",
+                          activebackground=C["primary_hover"], activeforeground="white",
+                          command=lambda lb=lb, items=items, f=is_file, k=key:
+                              add_item(lb, items, f, k)).pack(side=tk.RIGHT)
+
+                # Action row
+                ar = tk.Frame(cc, bg=C["surface"])
+                ar.pack(fill=tk.X)
+
+                if key == "apps":
+                    tk.Button(ar, text="\u2b50 Browse Installed\u2026",
+                              font=("Segoe UI", 9), bg=C["surface"], fg=C["primary"],
+                              relief="flat", padx=10, pady=3, cursor="hand2",
+                              activebackground="#eef2ff", activeforeground=C["primary_hover"],
+                              command=lambda lb=lb, items=items: browse_items(lb, items)
+                              ).pack(side=tk.LEFT)
+
+                tk.Button(ar, text="\u2716 Remove Selected",
+                          font=("Segoe UI", 9), bg=C["surface"], fg=C["danger"],
                           relief="flat", padx=10, pady=3, cursor="hand2",
-                          activebackground="#eef2ff", activeforeground=C["primary_hover"],
-                          command=lambda lb=lb, items=items: browse_items(lb, items)
-                          ).pack(side=tk.LEFT)
+                          activebackground=C["danger_bg"], activeforeground="#dc2626",
+                          command=lambda lb=lb, items=items: remove_item(lb, items)
+                          ).pack(side=tk.LEFT, padx=(8, 0))
 
-            tk.Button(ar, text="\u2716 Remove Selected",
-                      font=("Segoe UI", 9), bg=C["surface"], fg=C["danger"],
-                      relief="flat", padx=10, pady=3, cursor="hand2",
-                      activebackground=C["danger_bg"], activeforeground="#dc2626",
-                      command=lambda lb=lb, items=items: remove_item(lb, items)
-                      ).pack(side=tk.LEFT, padx=(8, 0))
+    rebuild_tabs()
 
     # --- Bottom bar ---
     bottom = tk.Frame(window, bg=C["surface"],
@@ -595,9 +685,69 @@ def release_lock():
         pass
 
 
-def exit_app(icon):
-    release_lock()
-    icon.stop()
+def check_for_updates(icon):
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/JonamMadeda/muktadha/releases/latest",
+            headers={"User-Agent": "Muktadha/1.0", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        latest_tag = data.get("tag_name", "").lstrip("v")
+        if not latest_tag:
+            return
+        if tuple(map(int, latest_tag.split("."))) <= tuple(map(int, __version__.split("."))):
+            return
+        url = None
+        is_installer = False
+        for asset in data.get("assets", []):
+            name = asset.get("name", "")
+            if name == "Muktadha_Installer.exe":
+                url = asset["browser_download_url"]
+                is_installer = True
+                break
+            if name == "Muktadha.exe":
+                url = asset["browser_download_url"]
+        if not url:
+            return
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        ans = messagebox.askyesno(
+            "Update Available",
+            f"Muktadha {latest_tag} is available (you have {__version__}).\nDownload and update now?",
+        )
+        root.destroy()
+        if not ans:
+            return
+        threading.Thread(target=download_and_update, args=(url, latest_tag, is_installer), daemon=True).start()
+    except Exception:
+        pass
+
+
+def download_and_update(url, version, is_installer):
+    try:
+        tmp = Path(tempfile.gettempdir()) / f"Muktadha_{version}.exe"
+        urllib.request.urlretrieve(url, tmp)
+        if is_installer:
+            subprocess.Popen([str(tmp), "/SILENT"])
+            release_lock()
+            sys.exit(0)
+        exe = sys.executable if getattr(sys, "frozen", False) else str(Path(__file__).resolve())
+        script = tmp.with_suffix(".ps1")
+        script.write_text(
+            f'Start-Sleep -Seconds 2\n'
+            f'Copy-Item -LiteralPath "{tmp}" -Destination "{exe}" -Force\n'
+            f'Start-Process -FilePath "{exe}"\n'
+            f'Remove-Item -LiteralPath "{tmp}" -Force -ErrorAction SilentlyContinue\n'
+            f'Remove-Item -LiteralPath "{script}" -Force -ErrorAction SilentlyContinue\n'
+        )
+        subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-File", str(script)])
+        release_lock()
+        sys.exit(0)
+    except Exception:
+        pass
 
 
 def show_splash():
