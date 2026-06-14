@@ -11,7 +11,7 @@ import urllib.error
 import webbrowser
 from pathlib import Path
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import psutil
 import pystray
