@@ -1,0 +1,34 @@
+{
+  "activeContext": "mktWork_01",
+  "modes": {
+    "mktWork_01": {
+      "displayName": "Work Mode",
+      "apps": [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome_proxy.exe",
+        "C:\\Users\\Me\\AppData\\Local\\Programs\\Antigravity IDE\\Antigravity IDE.exe",
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+      ],
+      "urls": [
+        "https://github.com",
+        "https://supabase.com/dashboard/org/ejskwixqboruyotodnhb"
+      ],
+      "closeOnSwitch": [
+        "Steam.exe",
+        "Spotify.exe"
+      ]
+    },
+    "mktChill_01": {
+      "displayName": "Chill Mode",
+      "apps": [
+        "C:\\Users\\User\\AppData\\Roaming\\Spotify\\Spotify.exe"
+      ],
+      "urls": [
+        "https://youtube.com"
+      ],
+      "closeOnSwitch": [
+        "code.exe",
+        "docker.exe"
+      ]
+    }
+  }
+}
