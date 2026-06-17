@@ -7,11 +7,10 @@ import sys
 import tempfile
 import threading
 import urllib.request
-import urllib.error
 import webbrowser
 from pathlib import Path
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 import psutil
 import pystray
@@ -25,8 +24,11 @@ CONFIG_PATH = BASE_DIR / "config.json"
 
 
 def load_config():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {"activeContext": "mktWork_01", "modes": {}}
 
 
 def save_config(config):
@@ -97,6 +99,7 @@ def switch_mode(mode_key):
     config["activeContext"] = mode_key
     save_config(config)
     print(f"[muktadha] Now active: {mode['displayName']}")
+    return mode["displayName"]
 
 
 def build_icon():
@@ -131,8 +134,8 @@ def build_menu(config):
 
         def make_callback(k):
             def cb(icon):
-                switch_mode(k)
-                icon.title = f"Muktadha - {config['modes'][k]['displayName']}"
+                name = switch_mode(k)
+                icon.title = f"Muktadha - {name}"
                 update_menu(icon)
 
             return cb
@@ -733,8 +736,8 @@ def download_and_update(url, version):
         subprocess.Popen([str(tmp), "/SILENT"])
         release_lock()
         sys.exit(0)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[muktadha] Update failed: {e}")
 
 
 def show_splash():
@@ -773,8 +776,9 @@ def show_splash():
     pb.pack(anchor=tk.CENTER, pady=(8, 0))
     pb.start(10)
 
-    splash.after(3000, splash.destroy)
+    splash.after(3000, splash.quit)
     splash.mainloop()
+    splash.destroy()
 
 
 def main():
@@ -836,8 +840,9 @@ if __name__ == "__main__":
         main()
     except Exception:
         try:
-            (BASE_DIR if "BASE_DIR" in dir() else Path(os.environ.get("APPDATA", ".")) / "Muktadha").mkdir(parents=True, exist_ok=True)
-            with open((BASE_DIR if "BASE_DIR" in dir() else Path(os.environ.get("APPDATA", ".")) / "Muktadha") / "muktadha_crash.log", "w") as f:
+            log_dir = Path(os.environ.get("APPDATA", ".")) / "Muktadha"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_dir / "muktadha_crash.log", "w") as f:
                 traceback.print_exc(file=f)
         except Exception:
             pass
